@@ -72,6 +72,12 @@ struct Text {
     text: String,
 }
 
+#[derive(Deserialize, Serialize, Clone, Debug)]
+enum Type {
+    Single(CargoInfo),
+    Multi(CargoInfo),
+}
+
 fn main() {
     env_logger::Builder::new()
         .filter_level(log::LevelFilter::Info)
@@ -140,30 +146,55 @@ fn run(inputs: impl Iterator<Item = String>, number: usize) {
     let re = regex::Regex::new(r"\.(pack|into|unpack)\(\)").unwrap();
     let re_default = regex::Regex::new(r"Default").unwrap();
     let re_default_type = regex::Regex::new(r"<(.*)>").unwrap();
-    let mut x: HashMap<String, HashMap<usize, CargoInfo>> = HashMap::new();
+    let re_unpack = regex::Regex::new(r"Unpack::<(.+)>::unpack\((.+)\)").unwrap();
+    let mut x: HashMap<String, HashMap<usize, Type>> = HashMap::new();
     let mut y: HashMap<String, HashSet<usize>> = HashMap::new();
 
     for each in res {
-        let span = each.message.spans.last().unwrap();
-
-        let code = &span.text[0].text;
-        if re.is_match(code) {
-            if y.entry(span.file_name.clone())
-                .or_default()
-                .insert(span.line_start)
-            {
-                x.entry(span.file_name.clone())
-                    .or_default()
-                    .insert(span.line_start, each.clone());
+        for span in &each.message.spans {
+            if span.line_start == span.line_end {
+                let code = &span.text[0].text;
+                if re.is_match(code) {
+                    if y.entry(span.file_name.clone())
+                        .or_default()
+                        .insert(span.line_start)
+                    {
+                        x.entry(span.file_name.clone())
+                            .or_default()
+                            .insert(span.line_start, Type::Single(each.clone()));
+                    }
+                } else if re_default.is_match(code) {
+                    if y.entry(span.file_name.clone())
+                        .or_default()
+                        .insert(span.line_start)
+                    {
+                        x.entry(span.file_name.clone())
+                            .or_default()
+                            .insert(span.line_start, Type::Single(each.clone()));
+                    }
+                } else if re_unpack.is_match(code) {
+                    if y.entry(span.file_name.clone())
+                        .or_default()
+                        .insert(span.line_start)
+                    {
+                        x.entry(span.file_name.clone())
+                            .or_default()
+                            .insert(span.line_start, Type::Single(each.clone()));
+                    }
+                }
+                continue;
             }
-        } else if re_default.is_match(code) {
-            if y.entry(span.file_name.clone())
-                .or_default()
-                .insert(span.line_start)
-            {
-                x.entry(span.file_name.clone())
-                    .or_default()
-                    .insert(span.line_start, each.clone());
+            for t in &span.text {
+                if re.is_match(&t.text) {
+                    if y.entry(span.file_name.clone())
+                        .or_default()
+                        .insert(span.line_start)
+                    {
+                        x.entry(span.file_name.clone())
+                            .or_default()
+                            .insert(span.line_start, Type::Multi(each.clone()));
+                    }
+                }
             }
         }
     }
@@ -183,21 +214,56 @@ fn run(inputs: impl Iterator<Item = String>, number: usize) {
 
         let old_buf = BufReader::new(file);
 
+        let mut skip_line_end = 0;
         for (index, line) in old_buf.lines().enumerate().map(|(i, l)| (i, l.unwrap())) {
-            if info.contains_key(&(index + 1)) {
-                if re.is_match(&line) {
-                    log::info!("remove .pack()/.into()/.unpack()");
-                    writeln!(&mut new_content, "{}", re.replace(&line, "")).unwrap();
-                } else if re_default.is_match(&line) {
-                    let m = re_default_type
-                        .find(&info.get(&(index + 1)).unwrap().message.children[0].message)
-                        .unwrap();
-                    let new = re_default.replace(&line, &m.as_str()[1..m.len() - 1]);
+            if index + 1 <= skip_line_end {
+                continue;
+            }
+            if let Some(t) = info.get(&(index + 1)) {
+                match t {
+                    Type::Single(inner) => {
+                        if re.is_match(&line) {
+                            log::info!("remove .pack()/.into()/.unpack()");
+                            writeln!(&mut new_content, "{}", re.replace(&line, "")).unwrap();
+                        } else if re_default.is_match(&line) {
+                            let m = re_default_type
+                                .find(&inner.message.children[0].message)
+                                .unwrap();
+                            let new = re_default.replace(&line, &m.as_str()[1..m.len() - 1]);
 
-                    log::info!("Default::default() replace with {}", new.trim());
-                    writeln!(&mut new_content, "{}", new).unwrap();
-                } else {
-                    writeln!(&mut new_content, "{}", line).unwrap();
+                            log::info!("Default::default() replace with {}", new.trim());
+                            writeln!(&mut new_content, "{}", new).unwrap();
+                        } else if re_unpack.is_match(&line) {
+                            log::info!("Change Unpack::unpack to Into::into");
+                            writeln!(
+                                &mut new_content,
+                                "{}",
+                                re_unpack.replace(&line, |caps: &regex::Captures| {
+                                    format!("Into::<{}>::into({})", &caps[1], &caps[2])
+                                })
+                            )
+                            .unwrap();
+                        } else {
+                            writeln!(&mut new_content, "{}", line).unwrap();
+                        }
+                    }
+                    Type::Multi(inner) => {
+                        for span in &inner.message.spans {
+                            if span.line_start == span.line_end {
+                                continue;
+                            }
+                            for t in &span.text {
+                                if re.is_match(&t.text) {
+                                    log::info!("remove .pack()/.into()/.unpack()");
+                                    writeln!(&mut new_content, "{}", re.replace(&t.text, ""))
+                                        .unwrap();
+                                } else {
+                                    writeln!(&mut new_content, "{}", t.text).unwrap();
+                                }
+                            }
+                            skip_line_end = std::cmp::max(skip_line_end, span.line_end);
+                        }
+                    }
                 }
             } else {
                 writeln!(&mut new_content, "{}", line).unwrap();
