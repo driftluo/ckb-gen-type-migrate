@@ -19,7 +19,7 @@ There are two modes of use
 1. Call cargo yourself in the project. Please note that cargo error messages are hierarchical and you need to call cargo repeatedly to maximize the effect. Recommended call 10 times
 
 ```bash
-$ cargo c --tests --message-format json | ckb-gen-type-migrate
+$ cargo c --tests --examples --message-format json | ckb-gen-type-migrate
 ```
 
 2. ckb-gen-type-migrate automatically calls cargo to perform operations, the default is to run 10 times

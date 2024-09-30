@@ -109,7 +109,7 @@ fn main() {
         for i in 0..number {
             log::info!("Get cargo data for the {} time", i);
             let output = Command::new("cargo")
-                .args(["check", "--tests", "--message-format", "json"])
+                .args(["check", "--tests", "--examples", "--message-format", "json"])
                 .output()
                 .expect("can't execute cargo check now");
             let inputs = BufReader::new(Cursor::new(output.stdout))
