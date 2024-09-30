@@ -76,6 +76,11 @@ fn main() {
     env_logger::Builder::new()
         .filter_level(log::LevelFilter::Info)
         .init();
+    let pwd = std::env::current_dir().expect("can't get current dir");
+    if !pwd.join(".git").exists() {
+        log::warn!("Your project is not protected by git. It is recommended to add git protection before processing.");
+        std::process::exit(0)
+    }
     let matches = clap::Command::new("ckb-gen-type-migrate")
         .name("CKB Gen Type Migrate ")
         .about("Help migrate breaking changes in molecule code")
@@ -115,6 +120,7 @@ fn main() {
     } else {
         run(io::stdin().lines().map(|l| l.unwrap()));
     }
+    log::info!("The migration is complete. You can now use `git diff` to view the changes.")
 }
 
 fn run(inputs: impl Iterator<Item = String>) {
@@ -173,7 +179,7 @@ fn run(inputs: impl Iterator<Item = String>) {
             for (index, line) in old_buf.lines().enumerate().map(|(i, l)| (i, l.unwrap())) {
                 if info.contains_key(&(index + 1)) {
                     if re.is_match(&line) {
-                        log::info!("repalce .pack()/.into()/.unpack()");
+                        log::info!("remove .pack()/.into()/.unpack()");
                         writeln!(&mut new_content, "{}", re.replace(&line, "")).unwrap();
                     } else if re_default.is_match(&line) {
                         let m = re_default_type
