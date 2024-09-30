@@ -1,0 +1,1 @@
+# ckb-gen-type-migrate
