@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::fs::{self};
+use std::fs;
 use std::io::{self, BufRead, BufReader, Cursor, Write};
 use std::process::Command;
+use std::str;
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 struct CargoInfo {
@@ -72,6 +73,9 @@ struct Text {
 }
 
 fn main() {
+    env_logger::Builder::new()
+        .filter_level(log::LevelFilter::Info)
+        .init();
     let matches = clap::Command::new("ckb-gen-type-migrate")
         .name("CKB Gen Type Migrate ")
         .about("Help migrate breaking changes in molecule code")
@@ -96,25 +100,24 @@ fn main() {
     let is_cargo = matches.get_flag("cargo");
     let number: usize = *matches.get_one("number").unwrap();
 
-    for _ in 0..number {
-        run(is_cargo);
+    if is_cargo {
+        for i in 0..number {
+            log::info!("Get cargo data for the {} time", i);
+            let output = Command::new("cargo")
+                .args(["check", "--tests", "--message-format", "json"])
+                .output()
+                .expect("can't execute cargo check now");
+            let inputs = BufReader::new(Cursor::new(output.stdout))
+                .lines()
+                .map(|l| l.unwrap());
+            run(inputs)
+        }
+    } else {
+        run(io::stdin().lines().map(|l| l.unwrap()));
     }
 }
 
-fn run(is_cargo: bool) {
-    let inputs: Box<dyn Iterator<Item = String>> = if is_cargo {
-        let output = Command::new("cargo")
-            .args(["check", "--tests", "--message-format", "json"])
-            .output()
-            .expect("can't execute cargo check now");
-        Box::new(
-            BufReader::new(Cursor::new(output.stdout))
-                .lines()
-                .map(|l| l.unwrap()),
-        )
-    } else {
-        Box::new(io::stdin().lines().map(|l| l.unwrap()))
-    };
+fn run(inputs: impl Iterator<Item = String>) {
     let mut res = Vec::new();
 
     for line in inputs {
@@ -135,7 +138,6 @@ fn run(is_cargo: bool) {
     let mut y: HashMap<String, HashSet<usize>> = HashMap::new();
     for each in res {
         let span = each.message.spans.last().unwrap();
-        // println!("{}, {}, {:?}", span.file_name, span.line_start, span.text);
 
         let code = &span.text[0].text;
         if re.is_match(code) {
@@ -156,21 +158,13 @@ fn run(is_cargo: bool) {
                     .or_default()
                     .insert(span.line_start, each.clone());
             }
-            // let m = re_default_type
-            //     .find(&each.message.children[0].message)
-            //     .unwrap();
-            // println!(
-            //     "{}, {}, {}",
-            //     code,
-            //     &m.as_str()[1..m.len() - 1],
-            //     re_default.replace(&code, &m.as_str()[1..m.len() - 1])
-            // );
         }
     }
     // return;
     use fs::OpenOptions;
     for _ in 0..3 {
         for (path, info) in x.iter() {
+            log::info!("start migrate {}", path);
             let mut new_content = Vec::new();
             let file = OpenOptions::new().read(true).open(&path).unwrap();
 
@@ -179,17 +173,16 @@ fn run(is_cargo: bool) {
             for (index, line) in old_buf.lines().enumerate().map(|(i, l)| (i, l.unwrap())) {
                 if info.contains_key(&(index + 1)) {
                     if re.is_match(&line) {
+                        log::info!("repalce .pack()/.into()/.unpack()");
                         writeln!(&mut new_content, "{}", re.replace(&line, "")).unwrap();
                     } else if re_default.is_match(&line) {
                         let m = re_default_type
                             .find(&info.get(&(index + 1)).unwrap().message.children[0].message)
                             .unwrap();
-                        writeln!(
-                            &mut new_content,
-                            "{}",
-                            re_default.replace(&line, &m.as_str()[1..m.len() - 1])
-                        )
-                        .unwrap();
+                        let new = re_default.replace(&line, &m.as_str()[1..m.len() - 1]);
+
+                        log::info!("Default::default() replace with {}", new.trim());
+                        writeln!(&mut new_content, "{}", new).unwrap();
                     } else {
                         writeln!(&mut new_content, "{}", line).unwrap();
                     }
