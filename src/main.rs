@@ -115,15 +115,15 @@ fn main() {
             let inputs = BufReader::new(Cursor::new(output.stdout))
                 .lines()
                 .map(|l| l.unwrap());
-            run(inputs)
+            run(inputs, i)
         }
     } else {
-        run(io::stdin().lines().map(|l| l.unwrap()));
+        run(io::stdin().lines().map(|l| l.unwrap()), 0);
     }
     log::info!("The migration is complete. You can now use `git diff` to view the changes.")
 }
 
-fn run(inputs: impl Iterator<Item = String>) {
+fn run(inputs: impl Iterator<Item = String>, number: usize) {
     let mut res = Vec::new();
 
     for line in inputs {
@@ -142,6 +142,7 @@ fn run(inputs: impl Iterator<Item = String>) {
     let re_default_type = regex::Regex::new(r"<(.*)>").unwrap();
     let mut x: HashMap<String, HashMap<usize, CargoInfo>> = HashMap::new();
     let mut y: HashMap<String, HashSet<usize>> = HashMap::new();
+
     for each in res {
         let span = each.message.spans.last().unwrap();
 
@@ -166,47 +167,52 @@ fn run(inputs: impl Iterator<Item = String>) {
             }
         }
     }
+
+    if x.is_empty() && number == 0 {
+        log::warn!("Maybe you haven't upgraded ckb-gen-type or there are other problems and we can't find the migration target.");
+        std::process::exit(0)
+    }
+
     // return;
     use fs::OpenOptions;
-    for _ in 0..3 {
-        for (path, info) in x.iter() {
-            log::info!("start migrate {}", path);
-            let mut new_content = Vec::new();
-            let file = OpenOptions::new().read(true).open(&path).unwrap();
 
-            let old_buf = BufReader::new(file);
+    for (path, info) in x.iter() {
+        log::info!("start migrate {}", path);
+        let mut new_content = Vec::new();
+        let file = OpenOptions::new().read(true).open(&path).unwrap();
 
-            for (index, line) in old_buf.lines().enumerate().map(|(i, l)| (i, l.unwrap())) {
-                if info.contains_key(&(index + 1)) {
-                    if re.is_match(&line) {
-                        log::info!("remove .pack()/.into()/.unpack()");
-                        writeln!(&mut new_content, "{}", re.replace(&line, "")).unwrap();
-                    } else if re_default.is_match(&line) {
-                        let m = re_default_type
-                            .find(&info.get(&(index + 1)).unwrap().message.children[0].message)
-                            .unwrap();
-                        let new = re_default.replace(&line, &m.as_str()[1..m.len() - 1]);
+        let old_buf = BufReader::new(file);
 
-                        log::info!("Default::default() replace with {}", new.trim());
-                        writeln!(&mut new_content, "{}", new).unwrap();
-                    } else {
-                        writeln!(&mut new_content, "{}", line).unwrap();
-                    }
+        for (index, line) in old_buf.lines().enumerate().map(|(i, l)| (i, l.unwrap())) {
+            if info.contains_key(&(index + 1)) {
+                if re.is_match(&line) {
+                    log::info!("remove .pack()/.into()/.unpack()");
+                    writeln!(&mut new_content, "{}", re.replace(&line, "")).unwrap();
+                } else if re_default.is_match(&line) {
+                    let m = re_default_type
+                        .find(&info.get(&(index + 1)).unwrap().message.children[0].message)
+                        .unwrap();
+                    let new = re_default.replace(&line, &m.as_str()[1..m.len() - 1]);
+
+                    log::info!("Default::default() replace with {}", new.trim());
+                    writeln!(&mut new_content, "{}", new).unwrap();
                 } else {
                     writeln!(&mut new_content, "{}", line).unwrap();
                 }
+            } else {
+                writeln!(&mut new_content, "{}", line).unwrap();
             }
-
-            fs::remove_file(&path).unwrap();
-            let mut file = OpenOptions::new()
-                .append(false)
-                .write(true)
-                .create(true)
-                .open(path)
-                .unwrap();
-
-            file.write_all(&new_content).unwrap();
-            file.sync_all().unwrap();
         }
+
+        fs::remove_file(&path).unwrap();
+        let mut file = OpenOptions::new()
+            .append(false)
+            .write(true)
+            .create(true)
+            .open(path)
+            .unwrap();
+
+        file.write_all(&new_content).unwrap();
+        file.sync_all().unwrap();
     }
 }
