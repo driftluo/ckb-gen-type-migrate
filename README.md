@@ -1,6 +1,6 @@
 # ckb-gen-type-migrate
 
-The `ckb-gen-types` crate had a major breaking change during the upgrade to 0.119, which included the following improvements:
+The `ckb-gen-types` crate had a major breaking change during the upgrade to 0.203, which included the following improvements:
 
 1. Add `From/Into` implementation for all structures while retaining `Pack/UnPack`
 2. Remove the use of `Pack/Unpack` in all libraries and change them all to `From/Into`
