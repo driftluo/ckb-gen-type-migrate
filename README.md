@@ -12,7 +12,7 @@ This library is used to solve more than 90% of migration code problems
 
 ### Usage
 
-First, upgrade your project's `ckb-gen-type` to `0.119`, and then use the following operation
+First, upgrade your project's `ckb-gen-type` to `0.203`, and then use the following operation
 
 There are two modes of use
 
@@ -26,6 +26,11 @@ $ cargo c --tests --examples --message-format json | ckb-gen-type-migrate
 
 ```bash
 $ ckb-gen-type-migrate --cargo
+```
+3. If the following changes are made and the extra brackets are not removed, you can run `cargo clippy --fix` to remove them:
+```bash
+- .capacity((120 * ONE_CKB).pack())
++ .capacity((120 * ONE_CKB))
 ```
 
 After that, most of the problems have been solved
